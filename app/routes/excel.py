@@ -1,0 +1,161 @@
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from app.models import ExcelValidationResponse, SuccessResponse, ErrorResponse
+from app.models.excel import ExcelProcessingResult
+from app.services import ExcelProcessor, SupabaseClient
+from app.config import settings
+import logging
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter()
+excel_processor = ExcelProcessor()
+supabase_client = SupabaseClient()
+
+
+@router.post("/upload", response_model=ExcelProcessingResult)
+async def upload_excel(
+    file: UploadFile = File(...),
+    workspace_id: str = Form(...),
+    user_id: str = Form(...),
+    dashboard_name: str = Form(None),
+):
+    """
+    Sube y procesa un archivo Excel
+    
+    - **file**: Archivo Excel (.xlsx, .xls)
+    - **workspace_id**: ID del workspace
+    - **user_id**: ID del usuario
+    - **dashboard_name**: Nombre opcional del dashboard
+    """
+    try:
+        # Validar tamaño del archivo
+        file_content = await file.read()
+        if len(file_content) > settings.max_file_size:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Archivo demasiado grande. Máximo: {settings.max_file_size / 1024 / 1024}MB"
+            )
+        
+        # Validar archivo
+        is_valid, errors = excel_processor.validate_file(file_content, file.filename)
+        if not is_valid:
+            raise HTTPException(status_code=400, detail={"errors": errors})
+        
+        # Procesar Excel
+        logger.info(f"Processing Excel file: {file.filename} for workspace: {workspace_id}")
+        processing_result = excel_processor.process_excel(
+            file_content,
+            workspace_id,
+            dashboard_name or file.filename.rsplit('.', 1)[0]
+        )
+        
+        if not processing_result["success"]:
+            raise HTTPException(status_code=500, detail=processing_result.get("error"))
+        
+        # Crear dashboard en Supabase
+        dashboard = await supabase_client.create_dashboard(
+            workspace_id=workspace_id,
+            name=dashboard_name or file.filename.rsplit('.', 1)[0],
+            description=f"Dashboard generado desde {file.filename}",
+            icon="table",
+            color="#228BE6"
+        )
+        
+        # TODO: En producción, crear tabla dinámica y insertar datos
+        # Por ahora, solo creamos el dashboard
+        
+        # Crear widget de tabla
+        widget = await supabase_client.create_widget(
+            dashboard_id=dashboard["id"],
+            widget_type="table",
+            config={
+                "title": "Datos de Excel",
+                "columns": processing_result["column_names"],
+                "data_source": processing_result["table_name"],
+            }
+        )
+        
+        return ExcelProcessingResult(
+            success=True,
+            dashboard_id=dashboard["id"],
+            rows_processed=processing_result["rows_processed"],
+            columns=processing_result["columns"],
+            table_name=processing_result["table_name"],
+            widgets_created=1,
+            processing_time=processing_result["processing_time"],
+            message=f"Excel procesado exitosamente. Dashboard '{dashboard['name']}' creado."
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error processing Excel: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/validate", response_model=ExcelValidationResponse)
+async def validate_excel(file: UploadFile = File(...)):
+    """
+    Valida un archivo Excel sin procesarlo
+    
+    - **file**: Archivo Excel a validar
+    """
+    try:
+        file_content = await file.read()
+        
+        # Validar archivo
+        is_valid, errors = excel_processor.validate_file(file_content, file.filename)
+        if not is_valid:
+            return ExcelValidationResponse(
+                valid=False,
+                sheets=[],
+                rows=0,
+                columns=0,
+                column_info=[],
+                file_size=len(file_content),
+                errors=errors
+            )
+        
+        # Analizar archivo
+        analysis = excel_processor.analyze_file(file_content)
+        
+        return ExcelValidationResponse(**analysis)
+        
+    except Exception as e:
+        logger.error(f"Error validating Excel: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/preview")
+async def preview_excel(
+    file: UploadFile = File(...),
+    rows: int = Form(10)
+):
+    """
+    Obtiene un preview de los datos del Excel
+    
+    - **file**: Archivo Excel
+    - **rows**: Número de filas a mostrar (default: 10)
+    """
+    try:
+        file_content = await file.read()
+        
+        # Validar archivo
+        is_valid, errors = excel_processor.validate_file(file_content, file.filename)
+        if not is_valid:
+            raise HTTPException(status_code=400, detail={"errors": errors})
+        
+        # Obtener preview
+        preview = excel_processor.get_data_preview(file_content, rows)
+        
+        return SuccessResponse(
+            message="Preview generado exitosamente",
+            data=preview
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting preview: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
