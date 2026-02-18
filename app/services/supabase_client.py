@@ -1,5 +1,6 @@
 from supabase import create_client, Client
 from app.config import settings
+from app.infrastructure import DataStorageService
 from typing import Dict, Any, List, Optional
 import logging
 
@@ -14,6 +15,7 @@ class SupabaseClient:
             settings.supabase_url,
             settings.supabase_key
         )
+        self.data_storage = DataStorageService(self.client)
     
     async def create_dashboard(
         self,
@@ -59,35 +61,23 @@ class SupabaseClient:
             logger.error(f"Error creating dashboard: {str(e)}")
             raise
     
-    async def create_data_table(
+    async def store_excel_data(
         self,
         workspace_id: str,
         table_name: str,
-        columns: List[Dict[str, str]]
-    ) -> bool:
-        """
-        Crea una tabla dinámica en Supabase para almacenar datos del Excel
-        Nota: En producción, esto requeriría permisos de admin o usar Supabase Management API
-        """
-        # Por ahora, esto es un placeholder
-        # En producción real, usarías la Management API de Supabase
-        logger.info(f"Table creation requested: {table_name} with {len(columns)} columns")
-        return True
-    
-    async def insert_data(
-        self,
-        table_name: str,
-        data: List[Dict[str, Any]]
+        data: List[Dict[str, Any]],
+        column_types: Dict[str, str]
     ) -> int:
-        """Inserta datos en una tabla"""
-        try:
-            result = self.client.table(table_name).insert(data).execute()
-            rows_inserted = len(result.data) if result.data else 0
-            logger.info(f"Inserted {rows_inserted} rows into {table_name}")
-            return rows_inserted
-        except Exception as e:
-            logger.error(f"Error inserting data: {str(e)}")
-            raise
+        """
+        Stores Excel data using DataStorageService
+        Uses data_tables_metadata + data_table_rows approach
+        """
+        return await self.data_storage.store_excel_data(
+            workspace_id=workspace_id,
+            table_name=table_name,
+            data=data,
+            column_types=column_types
+        )
     
     async def create_widget(
         self,

@@ -1,7 +1,8 @@
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 from app.models import ExcelValidationResponse, SuccessResponse, ErrorResponse
 from app.models.excel import ExcelProcessingResult
-from app.services import ExcelProcessor, SupabaseClient
+from app.contracts import IExcelProcessor, IDatabaseClient
+from app.factories import get_excel_processor, get_database_client
 from app.config import settings
 import logging
 from datetime import datetime
@@ -9,8 +10,6 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-excel_processor = ExcelProcessor()
-supabase_client = SupabaseClient()
 
 
 @router.post("/upload", response_model=ExcelProcessingResult)
@@ -19,6 +18,8 @@ async def upload_excel(
     workspace_id: str = Form(...),
     user_id: str = Form(...),
     dashboard_name: str = Form(None),
+    excel_processor: IExcelProcessor = Depends(get_excel_processor),
+    db_client: IDatabaseClient = Depends(get_database_client),
 ):
     """
     Sube y procesa un archivo Excel
@@ -54,7 +55,7 @@ async def upload_excel(
             raise HTTPException(status_code=500, detail=processing_result.get("error"))
         
         # Crear dashboard en Supabase
-        dashboard = await supabase_client.create_dashboard(
+        dashboard = await db_client.create_dashboard(
             workspace_id=workspace_id,
             name=dashboard_name or file.filename.rsplit('.', 1)[0],
             description=f"Dashboard generado desde {file.filename}",
@@ -62,29 +63,37 @@ async def upload_excel(
             color="#228BE6"
         )
         
-        # TODO: En producción, crear tabla dinámica y insertar datos
-        # Por ahora, solo creamos el dashboard
+        # ✅ IMPLEMENTADO: Persistir datos en Supabase
+        rows_stored = await db_client.store_excel_data(
+            workspace_id=workspace_id,
+            table_name=processing_result["table_name"],
+            data=processing_result["data"],
+            column_types=processing_result["column_types"]
+        )
+        
+        logger.info(f"Stored {rows_stored} rows in Supabase for table {processing_result['table_name']}")
         
         # Crear widget de tabla
-        widget = await supabase_client.create_widget(
+        widget = await db_client.create_widget(
             dashboard_id=dashboard["id"],
             widget_type="table",
             config={
                 "title": "Datos de Excel",
                 "columns": processing_result["column_names"],
                 "data_source": processing_result["table_name"],
+                "column_types": processing_result["column_types"],
             }
         )
         
         return ExcelProcessingResult(
             success=True,
             dashboard_id=dashboard["id"],
-            rows_processed=processing_result["rows_processed"],
+            rows_processed=rows_stored,
             columns=processing_result["columns"],
             table_name=processing_result["table_name"],
             widgets_created=1,
             processing_time=processing_result["processing_time"],
-            message=f"Excel procesado exitosamente. Dashboard '{dashboard['name']}' creado."
+            message=f"Excel procesado exitosamente. Dashboard '{dashboard['name']}' creado con {rows_stored} filas."
         )
         
     except HTTPException:
@@ -95,7 +104,10 @@ async def upload_excel(
 
 
 @router.post("/validate", response_model=ExcelValidationResponse)
-async def validate_excel(file: UploadFile = File(...)):
+async def validate_excel(
+    file: UploadFile = File(...),
+    excel_processor: IExcelProcessor = Depends(get_excel_processor),
+):
     """
     Valida un archivo Excel sin procesarlo
     
@@ -130,7 +142,8 @@ async def validate_excel(file: UploadFile = File(...)):
 @router.post("/preview")
 async def preview_excel(
     file: UploadFile = File(...),
-    rows: int = Form(10)
+    rows: int = Form(10),
+    excel_processor: IExcelProcessor = Depends(get_excel_processor),
 ):
     """
     Obtiene un preview de los datos del Excel
