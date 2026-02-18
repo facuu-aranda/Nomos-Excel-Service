@@ -7,9 +7,10 @@ python-multipart==0.0.20
 pandas==2.2.3
 openpyxl==3.1.5
 xlrd==2.0.1
+numpy<2.0.0  # Compatibilidad con pandas 2.2.3
 
 # Base de datos
-supabase==2.11.2
+supabase==2.10.0  # Versión estable (2.11.2 no existe)
 python-dotenv==1.0.1
 
 # Validación
