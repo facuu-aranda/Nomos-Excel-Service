@@ -1,21 +1,21 @@
 # FastAPI y servidor
-fastapi==0.115.6
-uvicorn[standard]==0.34.0
-python-multipart==0.0.20
+fastapi==0.109.2
+uvicorn[standard]==0.27.1
+python-multipart==0.0.9
 
 # Procesamiento de Excel
-pandas==2.2.3
-openpyxl==3.1.5
+pandas==2.2.0
+openpyxl==3.1.2
 xlrd==2.0.1
-numpy<2.0.0  # Compatibilidad con pandas 2.2.3
+numpy==1.26.4
 
 # Base de datos
-supabase==2.10.0  # Versión estable (2.11.2 no existe)
+supabase==2.10.0
 python-dotenv==1.0.1
 
-# Validación
-pydantic==2.10.6
-pydantic-settings==2.7.1
+# Validación (Versiones modernas funcionan bien en Python 3.11)
+pydantic==2.6.1
+pydantic-settings==2.1.0
 
 # Testing
 pytest==7.4.4
