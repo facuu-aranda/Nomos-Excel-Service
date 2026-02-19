@@ -56,7 +56,7 @@ DEBUG=False
 
 Render asignará una URL como:
 ```
-https://bento-excel-service.onrender.com
+https://nomos-excel-service.onrender.com
 ```
 
 ## 🔧 Configuración Post-Deploy
@@ -64,7 +64,7 @@ https://bento-excel-service.onrender.com
 ### 1. Verificar Health Check
 
 ```bash
-curl https://bento-excel-service.onrender.com/health
+curl https://nomos-excel-service.onrender.com/health
 ```
 
 Respuesta esperada:
@@ -81,17 +81,40 @@ Respuesta esperada:
 
 **Validar Excel:**
 ```bash
-curl -X POST https://bento-excel-service.onrender.com/api/excel/validate \
+curl -X POST https://nomos-excel-service.onrender.com/api/excel/validate \
   -F "file=@sample.xlsx"
 ```
 
-**Upload Excel:**
+**Procesar Excel (endpoint canónico):**
 ```bash
-curl -X POST https://bento-excel-service.onrender.com/api/excel/upload \
+curl -X POST https://nomos-excel-service.onrender.com/api/excel/process \
   -F "file=@sample.xlsx" \
   -F "workspace_id=workspace-123" \
   -F "user_id=user-456" \
   -F "dashboard_name=My Dashboard"
+```
+
+**Upload Excel (compatibilidad):**
+```bash
+curl -X POST https://nomos-excel-service.onrender.com/api/excel/upload \
+  -F "file=@sample.xlsx" \
+  -F "workspace_id=workspace-123" \
+  -F "user_id=user-456" \
+  -F "dashboard_name=My Dashboard"
+```
+
+### 3. Verificar wake-up en free tier
+
+Si el servicio está dormido, ejecutar un ping de wake-up y esperar 30-60s:
+
+```bash
+curl --max-time 30 https://nomos-excel-service.onrender.com/health
+```
+
+Opcional: revisar contrato desplegado
+
+```bash
+curl https://nomos-excel-service.onrender.com/openapi.json
 ```
 
 ## 🔐 Seguridad

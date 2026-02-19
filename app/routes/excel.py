@@ -1,19 +1,17 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
-from app.models import ExcelValidationResponse, SuccessResponse, ErrorResponse
+from app.models import ExcelValidationResponse, SuccessResponse
 from app.models.excel import ExcelProcessingResult
 from app.contracts import IExcelProcessor, IDatabaseClient
 from app.factories import get_excel_processor, get_database_client
 from app.config import settings
 import logging
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
-@router.post("/upload", response_model=ExcelProcessingResult)
-async def upload_excel(
+async def _process_excel_upload(
     file: UploadFile = File(...),
     workspace_id: str = Form(...),
     user_id: str = Form(...),
@@ -21,14 +19,7 @@ async def upload_excel(
     excel_processor: IExcelProcessor = Depends(get_excel_processor),
     db_client: IDatabaseClient = Depends(get_database_client),
 ):
-    """
-    Sube y procesa un archivo Excel
-    
-    - **file**: Archivo Excel (.xlsx, .xls)
-    - **workspace_id**: ID del workspace
-    - **user_id**: ID del usuario
-    - **dashboard_name**: Nombre opcional del dashboard
-    """
+    """Shared Excel processing logic for upload/process endpoints."""
     try:
         # Validar tamaño del archivo
         file_content = await file.read()
@@ -74,7 +65,7 @@ async def upload_excel(
         logger.info(f"Stored {rows_stored} rows in Supabase for table {processing_result['table_name']}")
         
         # Crear widget de tabla
-        widget = await db_client.create_widget(
+        await db_client.create_widget(
             dashboard_id=dashboard["id"],
             widget_type="table",
             config={
@@ -101,6 +92,60 @@ async def upload_excel(
     except Exception as e:
         logger.error(f"Error processing Excel: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/upload", response_model=ExcelProcessingResult)
+async def upload_excel(
+    file: UploadFile = File(...),
+    workspace_id: str = Form(...),
+    user_id: str = Form(...),
+    dashboard_name: str = Form(None),
+    excel_processor: IExcelProcessor = Depends(get_excel_processor),
+    db_client: IDatabaseClient = Depends(get_database_client),
+):
+    """
+    Sube y procesa un archivo Excel
+
+    - **file**: Archivo Excel (.xlsx, .xls)
+    - **workspace_id**: ID del workspace
+    - **user_id**: ID del usuario
+    - **dashboard_name**: Nombre opcional del dashboard
+    """
+    return await _process_excel_upload(
+        file=file,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        dashboard_name=dashboard_name,
+        excel_processor=excel_processor,
+        db_client=db_client,
+    )
+
+
+@router.post("/process", response_model=ExcelProcessingResult)
+async def process_excel(
+    file: UploadFile = File(...),
+    workspace_id: str = Form(...),
+    user_id: str = Form(...),
+    dashboard_name: str = Form(None),
+    excel_processor: IExcelProcessor = Depends(get_excel_processor),
+    db_client: IDatabaseClient = Depends(get_database_client),
+):
+    """
+    Endpoint canónico para procesar un archivo Excel (MVP Fase 5).
+
+    - **file**: Archivo Excel (.xlsx, .xls)
+    - **workspace_id**: ID del workspace
+    - **user_id**: ID del usuario
+    - **dashboard_name**: Nombre opcional del dashboard
+    """
+    return await _process_excel_upload(
+        file=file,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        dashboard_name=dashboard_name,
+        excel_processor=excel_processor,
+        db_client=db_client,
+    )
 
 
 @router.post("/validate", response_model=ExcelValidationResponse)

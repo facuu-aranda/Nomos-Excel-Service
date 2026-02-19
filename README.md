@@ -73,8 +73,23 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 ## 📚 API Endpoints
 
-### POST /api/excel/upload
-Sube y procesa un archivo Excel.
+### GET /health
+Health check para monitoreo y wake-up en Render free tier.
+
+**Response:**
+```json
+{
+  "status": "healthy",
+  "service": "bento-excel-service",
+  "version": "1.0.0",
+  "timestamp": "2026-02-19T06:19:30.543630",
+  "uptime_seconds": 832.74,
+  "supabase_configured": true
+}
+```
+
+### POST /api/excel/process
+Endpoint canónico para subir y procesar un archivo Excel.
 
 **Request:**
 ```json
@@ -95,17 +110,8 @@ Sube y procesa un archivo Excel.
 }
 ```
 
-### GET /api/excel/status/{job_id}
-Obtiene el estado de un procesamiento.
-
-**Response:**
-```json
-{
-  "status": "processing|completed|failed",
-  "progress": 75,
-  "message": "Processing rows..."
-}
-```
+### POST /api/excel/upload
+Alias backward-compatible de `/api/excel/process` (mantenido para compatibilidad).
 
 ### POST /api/excel/validate
 Valida un archivo Excel sin procesarlo.
@@ -117,6 +123,23 @@ Valida un archivo Excel sin procesarlo.
   "sheets": ["Sheet1", "Sheet2"],
   "rows": 150,
   "columns": 8
+}
+```
+
+### POST /api/excel/preview
+Devuelve preview de filas sin persistencia.
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Preview generado exitosamente",
+  "data": {
+    "headers": ["name", "amount"],
+    "rows": [["Alice", 100]],
+    "total_rows": 1,
+    "sample_size": 1
+  }
 }
 ```
 

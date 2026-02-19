@@ -101,6 +101,13 @@ class TestExcelProcessor:
         col_type = excel_processor._detect_column_type(series)
         
         assert col_type == "string"
+
+    def test_detect_column_type_boolean(self, excel_processor):
+        """Test detección de tipo boolean"""
+        series = pd.Series([True, False, True])
+        col_type = excel_processor._detect_column_type(series)
+
+        assert col_type == "boolean"
     
     def test_sanitize_column_name(self, excel_processor):
         """Test sanitización de nombres de columnas"""

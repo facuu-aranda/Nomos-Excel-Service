@@ -3,11 +3,15 @@ from fastapi.testclient import TestClient
 from app.main import app
 import pandas as pd
 import io
+from app.factories import get_database_client
 
 
 @pytest.fixture
 def client():
-    return TestClient(app)
+    app.dependency_overrides = {}
+    with TestClient(app) as test_client:
+        yield test_client
+    app.dependency_overrides = {}
 
 
 @pytest.fixture
@@ -39,7 +43,75 @@ class TestRoutes:
         response = client.get("/health")
         
         assert response.status_code == 200
-        assert response.json()["status"] == "healthy"
+        payload = response.json()
+        assert payload["status"] == "healthy"
+        assert "timestamp" in payload
+        assert "uptime_seconds" in payload
+
+    def test_process_excel_success(self, client, sample_excel_file):
+        """Test procesamiento exitoso vía endpoint canónico /process"""
+
+        class MockDBClient:
+            async def create_dashboard(self, workspace_id, name, description, icon="table", color="#228BE6"):
+                return {"id": "dashboard-123", "name": name}
+
+            async def store_excel_data(self, workspace_id, table_name, data, column_types):
+                return len(data)
+
+            async def create_widget(self, dashboard_id, widget_type, config):
+                return {"id": "widget-123"}
+
+            async def get_workspace(self, workspace_id):
+                return {"id": workspace_id}
+
+        app.dependency_overrides[get_database_client] = lambda: MockDBClient()
+
+        response = client.post(
+            "/api/excel/process",
+            files={"file": ("test.xlsx", sample_excel_file, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+            data={
+                "workspace_id": "workspace-123",
+                "user_id": "user-456",
+                "dashboard_name": "Sales Dashboard",
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["dashboard_id"] == "dashboard-123"
+        assert data["rows_processed"] == 2
+        assert data["widgets_created"] == 1
+
+    def test_process_excel_invalid_extension(self, client):
+        """Test error de validación cuando el archivo no es Excel"""
+
+        class MockDBClient:
+            async def create_dashboard(self, workspace_id, name, description, icon="table", color="#228BE6"):
+                return {"id": "dashboard-123", "name": name}
+
+            async def store_excel_data(self, workspace_id, table_name, data, column_types):
+                return len(data)
+
+            async def create_widget(self, dashboard_id, widget_type, config):
+                return {"id": "widget-123"}
+
+            async def get_workspace(self, workspace_id):
+                return {"id": workspace_id}
+
+        app.dependency_overrides[get_database_client] = lambda: MockDBClient()
+
+        response = client.post(
+            "/api/excel/process",
+            files={"file": ("test.txt", io.BytesIO(b"content"), "text/plain")},
+            data={
+                "workspace_id": "workspace-123",
+                "user_id": "user-456",
+            },
+        )
+
+        assert response.status_code == 400
+        assert "errors" in response.json()["detail"]
     
     def test_validate_excel_success(self, client, sample_excel_file):
         """Test validación exitosa de Excel"""

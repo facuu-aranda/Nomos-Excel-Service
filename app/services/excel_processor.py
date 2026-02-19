@@ -145,14 +145,14 @@ class ExcelProcessor:
             return "string"
         
         # Intentar detectar tipo
-        if pd.api.types.is_numeric_dtype(series):
+        if pd.api.types.is_bool_dtype(series):
+            return "boolean"
+        elif pd.api.types.is_numeric_dtype(series):
             if pd.api.types.is_integer_dtype(series):
                 return "integer"
             return "number"
         elif pd.api.types.is_datetime64_any_dtype(series):
             return "date"
-        elif pd.api.types.is_bool_dtype(series):
-            return "boolean"
         else:
             return "string"
     
