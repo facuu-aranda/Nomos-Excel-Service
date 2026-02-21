@@ -1,6 +1,7 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
+from typing import List
 from app.models import ExcelValidationResponse, SuccessResponse
-from app.models.excel import ExcelProcessingResult
+from app.models.excel import ExcelProcessingResult, ExcelProcessResponse, SheetProcessingResult
 from app.contracts import IExcelProcessor, IDatabaseClient
 from app.factories import get_excel_processor, get_database_client
 from app.config import settings
@@ -121,31 +122,78 @@ async def upload_excel(
     )
 
 
-@router.post("/process", response_model=ExcelProcessingResult)
+@router.post("/process", response_model=ExcelProcessResponse)
 async def process_excel(
     file: UploadFile = File(...),
     workspace_id: str = Form(...),
     user_id: str = Form(...),
-    dashboard_name: str = Form(None),
     excel_processor: IExcelProcessor = Depends(get_excel_processor),
     db_client: IDatabaseClient = Depends(get_database_client),
 ):
     """
-    Endpoint canónico para procesar un archivo Excel (MVP Fase 5).
+    Endpoint canónico para procesar un archivo Excel — multi-sheet, widget-ready (B5).
 
     - **file**: Archivo Excel (.xlsx, .xls)
     - **workspace_id**: ID del workspace
     - **user_id**: ID del usuario
-    - **dashboard_name**: Nombre opcional del dashboard
+
+    Returns a payload compatible with the frontend widget types (table, kpi,
+    bar_chart, line_chart, pie_chart) and the Next.js auto-dashboard builder.
     """
-    return await _process_excel_upload(
-        file=file,
-        workspace_id=workspace_id,
-        user_id=user_id,
-        dashboard_name=dashboard_name,
-        excel_processor=excel_processor,
-        db_client=db_client,
-    )
+    try:
+        file_content = await file.read()
+
+        if len(file_content) > settings.max_file_size:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Archivo demasiado grande. Máximo: {settings.max_file_size / 1024 / 1024:.0f}MB",
+            )
+
+        is_valid, errors = excel_processor.validate_file(file_content, file.filename or "")
+        if not is_valid:
+            raise HTTPException(status_code=400, detail={"errors": errors})
+
+        logger.info(
+            f"[process] Processing '{file.filename}' for workspace '{workspace_id}'"
+        )
+
+        result = excel_processor.process_all_sheets(file_content, workspace_id)
+
+        if not result.get("success"):
+            raise HTTPException(status_code=500, detail=result.get("error", "Error desconocido"))
+
+        # Persist data for each sheet and strip internal _data key from response
+        clean_sheets: List[SheetProcessingResult] = []
+        for sheet in result["sheets"]:
+            raw_data = sheet.pop("_data", [])
+            try:
+                await db_client.store_excel_data(
+                    workspace_id=workspace_id,
+                    table_name=sheet["table_name"],
+                    data=raw_data,
+                    column_types=sheet["column_types"],
+                )
+            except Exception as store_err:
+                logger.warning(
+                    f"[process] Could not persist data for sheet '{sheet['sheet_name']}': {store_err}"
+                )
+            clean_sheets.append(SheetProcessingResult(**sheet))
+
+        return ExcelProcessResponse(
+            success=True,
+            message=result["message"],
+            sheets_processed=result["sheets_processed"],
+            sheets=clean_sheets,
+            tables=result["tables"],
+            processing_time=result["processing_time"],
+            widgets_created=result["widgets_created"],
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[process] Unexpected error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/validate", response_model=ExcelValidationResponse)

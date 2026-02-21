@@ -6,8 +6,8 @@ class Settings(BaseSettings):
     """Configuración de la aplicación"""
     
     # Supabase
-    supabase_url: str
-    supabase_key: str
+    supabase_url: str = ""
+    supabase_key: str = ""
     
     # CORS
     allowed_origins: str = "http://localhost:3000"

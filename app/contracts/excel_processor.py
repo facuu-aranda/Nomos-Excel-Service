@@ -19,7 +19,15 @@ class IExcelProcessor(Protocol):
         workspace_id: str,
         dashboard_name: str = None
     ) -> Dict[str, Any]:
-        """Processes Excel file and returns structured data"""
+        """Processes Excel file and returns structured data (single-sheet, legacy)"""
+        ...
+    
+    def process_all_sheets(
+        self,
+        file_content: bytes,
+        workspace_id: str,
+    ) -> Dict[str, Any]:
+        """Processes all sheets and returns widget-ready multi-sheet payload"""
         ...
     
     def get_data_preview(self, file_content: bytes, rows: int = 10) -> Dict[str, Any]:
