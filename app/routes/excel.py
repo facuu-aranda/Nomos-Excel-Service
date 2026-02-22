@@ -5,6 +5,7 @@ from app.models.excel import ExcelProcessingResult, ExcelProcessResponse, SheetP
 from app.contracts import IExcelProcessor, IDatabaseClient
 from app.factories import get_excel_processor, get_database_client
 from app.config import settings
+from app.services.excel_processor import ExcelProcessingError
 import logging
 
 logger = logging.getLogger(__name__)
@@ -146,12 +147,37 @@ async def process_excel(
         if len(file_content) > settings.max_file_size:
             raise HTTPException(
                 status_code=413,
-                detail=f"Archivo demasiado grande. Máximo: {settings.max_file_size / 1024 / 1024:.0f}MB",
+                detail={
+                    "error": f"Archivo demasiado grande. Máximo: {settings.max_file_size / 1024 / 1024:.0f}MB",
+                    "error_code": "FILE_TOO_LARGE"
+                }
             )
 
         is_valid, errors = excel_processor.validate_file(file_content, file.filename or "")
         if not is_valid:
-            raise HTTPException(status_code=400, detail={"errors": errors})
+            # Determinar código de error basado en el mensaje
+            error_code = "VALIDATION_ERROR"
+            if errors:
+                error_msg = errors[0].lower()
+                if "corrupto" in error_msg or "dañado" in error_msg:
+                    error_code = "CORRUPTED_FILE"
+                elif "vacío" in error_msg:
+                    error_code = "EMPTY_FILE"
+                elif "no es un excel válido" in error_msg:
+                    error_code = "INVALID_EXCEL_FORMAT"
+                elif "no se pudo leer" in error_msg:
+                    error_code = "UNREADABLE_CONTENT"
+                elif "extensión" in error_msg:
+                    error_code = "INVALID_FILE_TYPE"
+            
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": errors[0] if errors else "Archivo inválido",
+                    "error_code": error_code,
+                    "errors": errors
+                }
+            )
 
         logger.info(
             f"[process] Processing '{file.filename}' for workspace '{workspace_id}'"
@@ -160,7 +186,13 @@ async def process_excel(
         result = excel_processor.process_all_sheets(file_content, workspace_id)
 
         if not result.get("success"):
-            raise HTTPException(status_code=500, detail=result.get("error", "Error desconocido"))
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": result.get("error", "Error desconocido"),
+                    "error_code": "PROCESSING_ERROR"
+                }
+            )
 
         # Persist data for each sheet and strip internal _data key from response
         clean_sheets: List[SheetProcessingResult] = []
@@ -193,7 +225,13 @@ async def process_excel(
         raise
     except Exception as e:
         logger.error(f"[process] Unexpected error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "Error interno del servidor",
+                "error_code": "INTERNAL_ERROR"
+            }
+        )
 
 
 @router.post("/validate", response_model=ExcelValidationResponse)
@@ -210,16 +248,30 @@ async def validate_excel(
         file_content = await file.read()
         
         # Validar archivo
-        is_valid, errors = excel_processor.validate_file(file_content, file.filename)
+        is_valid, errors = excel_processor.validate_file(file_content, file.filename or "")
         if not is_valid:
-            return ExcelValidationResponse(
-                valid=False,
-                sheets=[],
-                rows=0,
-                columns=0,
-                column_info=[],
-                file_size=len(file_content),
-                errors=errors
+            # Determinar código de error basado en el mensaje
+            error_code = "VALIDATION_ERROR"
+            if errors:
+                error_msg = errors[0].lower()
+                if "corrupto" in error_msg or "dañado" in error_msg:
+                    error_code = "CORRUPTED_FILE"
+                elif "vacío" in error_msg:
+                    error_code = "EMPTY_FILE"
+                elif "no es un excel válido" in error_msg:
+                    error_code = "INVALID_EXCEL_FORMAT"
+                elif "no se pudo leer" in error_msg:
+                    error_code = "UNREADABLE_CONTENT"
+                elif "extensión" in error_msg:
+                    error_code = "INVALID_FILE_TYPE"
+            
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": errors[0] if errors else "Archivo inválido",
+                    "error_code": error_code,
+                    "errors": errors
+                }
             )
         
         # Analizar archivo
@@ -227,9 +279,17 @@ async def validate_excel(
         
         return ExcelValidationResponse(**analysis)
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error validating Excel: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "Error interno del servidor",
+                "error_code": "INTERNAL_ERROR"
+            }
+        )
 
 
 @router.post("/preview")

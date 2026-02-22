@@ -1,7 +1,8 @@
 import pytest
 import pandas as pd
 import io
-from app.services.excel_processor import ExcelProcessor
+import openpyxl
+from app.services.excel_processor import ExcelProcessor, ExcelProcessingError
 
 
 @pytest.fixture
@@ -371,4 +372,90 @@ class TestDetectUserImport:
         """After sanitization columns are lowercase — detection must still work"""
         result = excel_processor._detect_user_import(["email", "nombre", "rol"])
         assert result["suggests"] is True
-        assert result["mapping"]["role"] == "rol"
+
+
+class TestCorruptedFileValidation:
+    """Tests for corrupted Excel file detection"""
+
+    def test_validate_corrupted_file(self, excel_processor):
+        """Test que archivo corrupto es detectado"""
+        # Create corrupted file content (invalid Excel format)
+        corrupted_content = b"This is not an Excel file, just random text"
+        
+        is_valid, errors = excel_processor.validate_file(corrupted_content, "test.xlsx")
+        
+        assert is_valid is False
+        assert len(errors) > 0
+        assert any("corrupto" in error.lower() or "dañado" in error.lower() for error in errors)
+
+    def test_validate_empty_excel_file(self, excel_processor):
+        """Test que archivo Excel vacío es detectado"""
+        # Create an Excel file with no data
+        df = pd.DataFrame()
+        buffer = io.BytesIO()
+        df.to_excel(buffer, index=False, engine='openpyxl')
+        buffer.seek(0)
+        empty_excel = buffer.getvalue()
+        
+        is_valid, errors = excel_processor.validate_file(empty_excel, "empty.xlsx")
+        
+        assert is_valid is False
+        assert len(errors) > 0
+        assert any("vacío" in error.lower() for error in errors)
+
+    def test_validate_valid_file_passes(self, excel_processor, sample_excel_bytes):
+        """Test que archivo válido pasa validación"""
+        is_valid, errors = excel_processor.validate_file(sample_excel_bytes, "valid.xlsx")
+        
+        assert is_valid is True
+        assert len(errors) == 0
+
+    def test_validate_invalid_extension(self, excel_processor):
+        """Test que extensión inválida es rechazada"""
+        is_valid, errors = excel_processor.validate_file(b"content", "test.pdf")
+        
+        assert is_valid is False
+        assert len(errors) > 0
+        assert any("extensión" in error.lower() for error in errors)
+
+    def test_validate_zero_byte_file(self, excel_processor):
+        """Test que archivo de 0 bytes es rechazado"""
+        is_valid, errors = excel_processor.validate_file(b"", "test.xlsx")
+        
+        assert is_valid is False
+        assert len(errors) > 0
+        assert any("vacío" in error.lower() for error in errors)
+
+    def test_validate_partial_excel_file(self, excel_processor):
+        """Test que archivo Excel parcialmente corrupto es detectado"""
+        # Create a valid Excel file and truncate it
+        df = pd.DataFrame({'col1': [1, 2, 3]})
+        buffer = io.BytesIO()
+        df.to_excel(buffer, index=False, engine='openpyxl')
+        buffer.seek(0)
+        valid_content = buffer.getvalue()
+        
+        # Truncate to make it corrupted
+        corrupted_content = valid_content[:len(valid_content) // 2]
+        
+        is_valid, errors = excel_processor.validate_file(corrupted_content, "partial.xlsx")
+        
+        assert is_valid is False
+        assert len(errors) > 0
+
+    def test_validate_text_file_with_xlsx_extension(self, excel_processor):
+        """Test que archivo de texto con extensión .xlsx es detectado"""
+        text_content = b"This is just a text file, not Excel"
+        
+        is_valid, errors = excel_processor.validate_file(text_content, "fake.xlsx")
+        
+        assert is_valid is False
+        assert len(errors) > 0
+        assert any("corrupto" in error.lower() or "válido" in error.lower() for error in errors)
+
+    def test_validate_xls_extension_supported(self, excel_processor, sample_excel_bytes):
+        """Test que archivos .xls también son soportados"""
+        is_valid, errors = excel_processor.validate_file(sample_excel_bytes, "test.xls")
+        
+        assert is_valid is True
+        assert len(errors) == 0

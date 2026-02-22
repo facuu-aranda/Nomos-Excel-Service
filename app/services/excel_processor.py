@@ -4,8 +4,18 @@ import logging
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
 import re
+import openpyxl
+from openpyxl.utils.exceptions import InvalidFileException
 
 logger = logging.getLogger(__name__)
+
+
+class ExcelProcessingError(Exception):
+    """Custom exception for Excel processing errors"""
+    def __init__(self, message: str, error_code: str):
+        self.message = message
+        self.error_code = error_code
+        super().__init__(self.message)
 
 
 class ExcelProcessor:
@@ -15,22 +25,42 @@ class ExcelProcessor:
         self.supported_extensions = ['.xlsx', '.xls']
     
     def validate_file(self, file_content: bytes, filename: str) -> Tuple[bool, List[str]]:
-        """Valida un archivo Excel"""
+        """Valida un archivo Excel y detecta archivos corruptos"""
         errors = []
         
         # Validar extensión
         if not any(filename.lower().endswith(ext) for ext in self.supported_extensions):
             errors.append(f"Extensión no soportada. Use: {', '.join(self.supported_extensions)}")
+            return False, errors
         
         # Validar que no esté vacío
         if len(file_content) == 0:
             errors.append("El archivo está vacío")
+            return False, errors
         
-        # Intentar leer el archivo
+        # Validación 1: Intentar abrir con openpyxl (detecta archivos corruptos)
         try:
-            pd.read_excel(io.BytesIO(file_content), nrows=0)
+            workbook = openpyxl.load_workbook(io.BytesIO(file_content), read_only=True)
+            workbook.close()
+        except InvalidFileException as e:
+            logger.error(f"Invalid Excel file (openpyxl): {e}")
+            errors.append("El archivo no es un Excel válido o está corrupto")
+            return False, errors
         except Exception as e:
-            errors.append(f"Error al leer el archivo: {str(e)}")
+            logger.error(f"Error reading Excel with openpyxl: {e}")
+            errors.append("El archivo Excel está corrupto o dañado")
+            return False, errors
+        
+        # Validación 2: Intentar leer con pandas (más estricto)
+        try:
+            df = pd.read_excel(io.BytesIO(file_content), nrows=1)
+            if df.empty and len(df.columns) == 0:
+                errors.append("El archivo Excel está vacío")
+                return False, errors
+        except Exception as e:
+            logger.error(f"Error reading Excel with pandas: {e}")
+            errors.append("No se pudo leer el contenido del archivo")
+            return False, errors
         
         return len(errors) == 0, errors
     
